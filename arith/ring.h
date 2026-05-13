@@ -28,9 +28,16 @@ extern "C"
     poly x[RRLWR_K];
   } ring_element;
 
+  typedef struct{
+    poly x[2 * RRLWR_K - 1];
+  } ring_element_Awin_ntt;
+
   void ring_ntt32(ring_element *r, int32_t prime, int32_t primeinv, int32_t fp_zetas[RRLWR_N]);
+  void ring_uniform_Awin_ntt(ring_element_Awin_ntt *aw, int32_t bitlen, const unsigned char *seed, int32_t seed_len, int32_t prime, int32_t primeinv, int32_t oneR, int32_t twoR, int32_t fp_zetas[RRLWR_N]);
   void ring_mul_invntt32(poly *r, ring_element *a, ring_element *b, int ncoeffs, int32_t prime, int32_t primeinv, int32_t finalconst, int32_t oneR, int32_t twoR, int32_t fp_zetas[RRLWR_N]);
   void ring_mul32(poly *r, ring_element *a, ring_element *b, int ncoeffs, int32_t prime, int32_t primeinv, int32_t finalconst, int32_t oneR, int32_t twoR, int32_t fp_zetas[RRLWR_N]);
+  void ring_mul_invntt32_Awin(poly *r, const ring_element_Awin_ntt *a, ring_element *b, int ncoeffs, int32_t prime, int32_t primeinv, int32_t finalconst, int32_t fp_zetas[RRLWR_N]);
+  void ring_mul32_Awin(poly *r, const ring_element_Awin_ntt *a, ring_element *b, int ncoeffs, int32_t prime, int32_t primeinv, int32_t finalconst, int32_t fp_zetas[RRLWR_N]);
   void ring_round_xtoy(ring_element *r, const ring_element *f, int32_t x, int32_t y);
 
 #ifdef __cplusplus

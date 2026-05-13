@@ -63,13 +63,13 @@ void poly_invntt32(poly *f, int32_t prime, int32_t primeinv, int32_t finalconst,
   }
 }
 
-void poly_basemul32(poly *r, poly *f, poly *g, int32_t prime, int32_t primeinv) {
+void poly_basemul32(poly *r, const poly *f, const poly *g, int32_t prime, int32_t primeinv) {
   for(unsigned int i = 0; i < RRLWR_N; i++) {
     r->coeffs[i] = montgomery_mul32(f->coeffs[i], g->coeffs[i], prime, primeinv);
   }
 }
 
-void poly_add32(poly *r, poly *f, poly *g, int32_t prime) {
+void poly_add32(poly *r, const poly *f, const poly *g, int32_t prime) {
   for(unsigned int i = 0; i < RRLWR_N; i++) {
     r->coeffs[i] = add32(f->coeffs[i], g->coeffs[i], prime);
   }

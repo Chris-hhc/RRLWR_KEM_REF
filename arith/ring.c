@@ -15,6 +15,7 @@
  */
 
 #include "ring.h"
+#include "uniform.h"
 
 /// @brief Compute NTT(y+2) in Montgomery domain, on-the-fly only if PRECOMPUTE_TWIST is not defined
 static void compute_yp2(poly *r, int32_t prime, int32_t primeinv, int32_t fp_zetas[RRLWR_N], int32_t oneR, int32_t twoR)
@@ -54,6 +55,33 @@ static void compute_yp2(poly *r, int32_t prime, int32_t primeinv, int32_t fp_zet
 void ring_ntt32(ring_element *r, int32_t prime, int32_t primeinv, int32_t fp_zetas[RRLWR_N]) {
   for(int i = 0; i < RRLWR_K; i++) {
     poly_ntt32(&r->x[i], prime, primeinv, fp_zetas);
+  }
+}
+
+void ring_uniform_Awin_ntt(ring_element_Awin_ntt *aw,
+                           int32_t bitlen,
+                           const unsigned char *seed,
+                           int32_t seed_len,
+                           int32_t prime,
+                           int32_t primeinv,
+                           int32_t oneR,
+                           int32_t twoR,
+                           int32_t fp_zetas[RRLWR_N]) {
+  poly a, yp2;
+
+  if(RRLWR_K > 1) {
+    compute_yp2(&yp2, prime, primeinv, fp_zetas, oneR, twoR);
+  }
+
+  for(unsigned char u = 0; u < RRLWR_K; u++) {
+    poly_uniform(&a, bitlen, seed, seed_len, u);
+    poly_ntt32(&a, prime, primeinv, fp_zetas);
+
+    aw->x[RRLWR_K - 1 - u] = a;
+
+    if(u > 0) {
+      poly_basemul32(&aw->x[2 * RRLWR_K - 1 - u], &a, &yp2, prime, primeinv);
+    }
   }
 }
 
@@ -183,11 +211,9 @@ void ring_mul_invntt32(poly *r,
      */
     poly *row = &Aline[RRLWR_K - 1 - i];
 
-    for (int c = 0; c < RRLWR_N; c++) {
-      r[out].coeffs[c] = 0;
-    }
+    poly_basemul32(&r[out], &row[0], &b->x[0], prime, primeinv);
 
-    for (int j = 0; j < RRLWR_K; j++) {
+    for (int j = 1; j < RRLWR_K; j++) {
       poly_basemul32(&t, &row[j], &b->x[j], prime, primeinv);
       poly_add32(&r[out], &r[out], &t, prime);
     }
@@ -196,6 +222,35 @@ void ring_mul_invntt32(poly *r,
   /*
    * Transform requested output coefficients back to polynomial domain.
    */
+  for (int i = 0; i < ncoeffs; i++) {
+    poly_invntt32(&r[i], prime, primeinv, finalconst, fp_zetas);
+    poly_conditional_final_reduce32(&r[i], prime);
+  }
+}
+
+void ring_mul_invntt32_Awin(poly *r,
+                            const ring_element_Awin_ntt *a,
+                            ring_element *b,
+                            int ncoeffs,
+                            int32_t prime,
+                            int32_t primeinv,
+                            int32_t finalconst,
+                            int32_t fp_zetas[RRLWR_N]) {
+  poly t;
+  int row_min = RRLWR_K - ncoeffs;
+
+  for (int i = RRLWR_K - 1; i >= row_min; i--) {
+    int out = i - row_min;
+    const poly *row = &a->x[RRLWR_K - 1 - i];
+
+    poly_basemul32(&r[out], &row[0], &b->x[0], prime, primeinv);
+
+    for (int j = 1; j < RRLWR_K; j++) {
+      poly_basemul32(&t, &row[j], &b->x[j], prime, primeinv);
+      poly_add32(&r[out], &r[out], &t, prime);
+    }
+  }
+
   for (int i = 0; i < ncoeffs; i++) {
     poly_invntt32(&r[i], prime, primeinv, finalconst, fp_zetas);
     poly_conditional_final_reduce32(&r[i], prime);
@@ -269,6 +324,12 @@ void ring_mul32(poly *r, ring_element *a, ring_element *b, int ncoeffs, int32_t 
   ring_ntt32(a, prime, primeinv, fp_zetas);
   ring_ntt32(b, prime, primeinv, fp_zetas);
   ring_mul_invntt32(r, a, b, ncoeffs, prime, primeinv, finalconst, oneR, twoR, fp_zetas);
+}
+
+void ring_mul32_Awin(poly *r, const ring_element_Awin_ntt *a, ring_element *b, int ncoeffs, int32_t prime, int32_t primeinv, int32_t finalconst, int32_t fp_zetas[RRLWR_N])
+{
+  ring_ntt32(b, prime, primeinv, fp_zetas);
+  ring_mul_invntt32_Awin(r, a, b, ncoeffs, prime, primeinv, finalconst, fp_zetas);
 }
 
 void ring_round_xtoy(ring_element *r, const ring_element *f, int32_t x, int32_t y) {
