@@ -85,6 +85,38 @@ void ring_uniform_Awin_ntt(ring_element_Awin_ntt *aw,
   }
 }
 
+void ring_to_Awin_q13(ring_element_Awin_q13 *aw, const ring_element *a) {
+  for(unsigned char u = 0; u < RRLWR_K; u++) {
+    aw->x[RRLWR_K - 1 - u] = a->x[u];
+  }
+
+  for(unsigned char u = 1; u < RRLWR_K; u++) {
+    int base = RRLWR_K - 1 - u;
+    int dst = 2 * RRLWR_K - 1 - u;
+
+    poly_mul_yplus2_q13(&aw->x[dst], &aw->x[base]);
+  }
+}
+
+void ring_uniform_Awin_q13(ring_element_Awin_q13 *aw,
+                           int32_t bitlen,
+                           const unsigned char *seed,
+                           int32_t seed_len) {
+  poly a;
+
+  for(unsigned char u = 0; u < RRLWR_K; u++) {
+    poly_uniform(&a, bitlen, seed, seed_len, u);
+    aw->x[RRLWR_K - 1 - u] = a;
+  }
+
+  for(unsigned char u = 1; u < RRLWR_K; u++) {
+    int base = RRLWR_K - 1 - u;
+    int dst = 2 * RRLWR_K - 1 - u;
+
+    poly_mul_yplus2_q13(&aw->x[dst], &aw->x[base]);
+  }
+}
+
 /// @brief Full ring multiplication assuming its inputs are already in NTT domain.
 ///        The output element r is not in NTT domain and is fully reduced with all coefficients in [-q/2, q/2+1]
 // void ring_mul_invntt32(poly *r, ring_element *a, ring_element *b, int ncoeffs, int32_t prime, int32_t primeinv, int32_t finalconst, int32_t oneR, int32_t twoR, int32_t fp_zetas[RRLWR_N]) {
@@ -330,6 +362,34 @@ void ring_mul32_Awin(poly *r, const ring_element_Awin_ntt *a, ring_element *b, i
 {
   ring_ntt32(b, prime, primeinv, fp_zetas);
   ring_mul_invntt32_Awin(r, a, b, ncoeffs, prime, primeinv, finalconst, fp_zetas);
+}
+
+void ring_mul_q13_Awin(poly *r,
+                       const ring_element_Awin_q13 *a,
+                       const ring_element *b,
+                       int ncoeffs) {
+  int row_min = RRLWR_K - ncoeffs;
+
+  for(int i = RRLWR_K - 1; i >= row_min; i--) {
+    int out = i - row_min;
+    const poly *row = &a->x[RRLWR_K - 1 - i];
+
+    poly_mul_q13(&r[out], &row[0], &b->x[0]);
+
+    for(int j = 1; j < RRLWR_K; j++) {
+      poly_macc_q13(&r[out], &row[j], &b->x[j]);
+    }
+  }
+}
+
+void ring_mul_q13(poly *r,
+                  const ring_element *a,
+                  const ring_element *b,
+                  int ncoeffs) {
+  ring_element_Awin_q13 aw;
+
+  ring_to_Awin_q13(&aw, a);
+  ring_mul_q13_Awin(r, &aw, b, ncoeffs);
 }
 
 void ring_round_xtoy(ring_element *r, const ring_element *f, int32_t x, int32_t y) {

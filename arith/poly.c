@@ -16,6 +16,85 @@
 
 #include "poly.h"
 
+#ifndef NDEBUG
+#include <stdio.h>
+#include <stdlib.h>
+#endif
+
+#define TOOM4_BLK (32)
+#define TOOM4_BASE (16)
+#define TOOM4_SMALL_PROD (31)
+#define TOOM4_MID_PROD (63)
+#define TOOM4_FULL_PROD (255)
+
+static inline int32_t q13_reduce_u(int64_t x) {
+  return (int32_t)((uint64_t)x & 8191u);
+}
+
+static inline int64_t q13_center_i64(int32_t x) {
+  int32_t y = x & 8191;
+
+  if(y > 4096) {
+    y -= 8192;
+  }
+
+  return (int64_t)y;
+}
+
+static inline int64_t divexact_i64(int64_t x, int64_t d) {
+#ifndef NDEBUG
+  if(x % d != 0) {
+    fprintf(stderr, "divexact_i64 failed: %lld %% %lld != 0\n",
+            (long long)x, (long long)d);
+    abort();
+  }
+#endif
+
+  return x / d;
+}
+
+static void mul16_schoolbook_i64(int64_t out[TOOM4_SMALL_PROD],
+                                 const int64_t a[TOOM4_BASE],
+                                 const int64_t b[TOOM4_BASE]) {
+  for(unsigned int i = 0; i < TOOM4_SMALL_PROD; i++) {
+    out[i] = 0;
+  }
+
+  for(unsigned int i = 0; i < TOOM4_BASE; i++) {
+    for(unsigned int j = 0; j < TOOM4_BASE; j++) {
+      out[i + j] += a[i] * b[j];
+    }
+  }
+}
+
+static void mul32_karatsuba_i64(int64_t out[TOOM4_MID_PROD],
+                                const int64_t a[TOOM4_BLK],
+                                const int64_t b[TOOM4_BLK]) {
+  int64_t z0[TOOM4_SMALL_PROD], z1[TOOM4_SMALL_PROD], z2[TOOM4_SMALL_PROD];
+  int64_t sa[TOOM4_BASE], sb[TOOM4_BASE];
+
+  for(unsigned int i = 0; i < TOOM4_MID_PROD; i++) {
+    out[i] = 0;
+  }
+
+  mul16_schoolbook_i64(z0, a, b);
+  mul16_schoolbook_i64(z2, a + TOOM4_BASE, b + TOOM4_BASE);
+
+  for(unsigned int i = 0; i < TOOM4_BASE; i++) {
+    sa[i] = a[i] + a[i + TOOM4_BASE];
+    sb[i] = b[i] + b[i + TOOM4_BASE];
+  }
+
+  mul16_schoolbook_i64(z1, sa, sb);
+
+  for(unsigned int i = 0; i < TOOM4_SMALL_PROD; i++) {
+    z1[i] -= z0[i] + z2[i];
+    out[i] += z0[i];
+    out[i + TOOM4_BASE] += z1[i];
+    out[i + 2 * TOOM4_BASE] += z2[i];
+  }
+}
+
 void poly_ntt32(poly *f, int32_t prime, int32_t primeinv, int32_t fp_zetas[RRLWR_N]) {
   unsigned int len, start, j, k;
   int32_t t, fp_zeta;
@@ -66,6 +145,142 @@ void poly_invntt32(poly *f, int32_t prime, int32_t primeinv, int32_t finalconst,
 void poly_basemul32(poly *r, const poly *f, const poly *g, int32_t prime, int32_t primeinv) {
   for(unsigned int i = 0; i < RRLWR_N; i++) {
     r->coeffs[i] = montgomery_mul32(f->coeffs[i], g->coeffs[i], prime, primeinv);
+  }
+}
+
+void poly_mul_yplus2_q13(poly *r, const poly *a) {
+  r->coeffs[0] = mod_q13_u(-(int64_t)a->coeffs[RRLWR_N - 1] + 2LL * a->coeffs[0]);
+
+  for(unsigned int i = 1; i < RRLWR_N; i++) {
+    r->coeffs[i] = mod_q13_u((int64_t)a->coeffs[i - 1] + 2LL * a->coeffs[i]);
+  }
+}
+
+void poly_mul_q13_schoolbook(poly *r, const poly *a, const poly *b) {
+  int64_t tmp[RRLWR_N] = {0};
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    int64_t ai = a->coeffs[i];
+
+    for(unsigned int j = 0; j < RRLWR_N; j++) {
+      int64_t prod = ai * (int64_t)b->coeffs[j];
+      unsigned int d = i + j;
+
+      if(d < RRLWR_N) {
+        tmp[d] += prod;
+      } else {
+        tmp[d - RRLWR_N] -= prod;
+      }
+    }
+  }
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    r->coeffs[i] = mod_q13_u(tmp[i]);
+  }
+}
+
+void poly_mul_q13_toom4x32_karatsuba(poly *r, const poly *a, const poly *b) {
+  int64_t a0[TOOM4_BLK], a1[TOOM4_BLK], a2[TOOM4_BLK], a3[TOOM4_BLK];
+  int64_t b0[TOOM4_BLK], b1[TOOM4_BLK], b2[TOOM4_BLK], b3[TOOM4_BLK];
+  int64_t ae0[TOOM4_BLK], ae1[TOOM4_BLK], aem1[TOOM4_BLK];
+  int64_t ae2[TOOM4_BLK], aem2[TOOM4_BLK], ae3[TOOM4_BLK], aeinf[TOOM4_BLK];
+  int64_t be0[TOOM4_BLK], be1[TOOM4_BLK], bem1[TOOM4_BLK];
+  int64_t be2[TOOM4_BLK], bem2[TOOM4_BLK], be3[TOOM4_BLK], beinf[TOOM4_BLK];
+  int64_t v0[TOOM4_MID_PROD], v1[TOOM4_MID_PROD], vm1[TOOM4_MID_PROD];
+  int64_t v2[TOOM4_MID_PROD], vm2[TOOM4_MID_PROD], v3[TOOM4_MID_PROD];
+  int64_t vinf[TOOM4_MID_PROD];
+  int64_t full[TOOM4_FULL_PROD];
+
+  for(unsigned int i = 0; i < TOOM4_BLK; i++) {
+    a0[i] = q13_center_i64(a->coeffs[i]);
+    a1[i] = q13_center_i64(a->coeffs[TOOM4_BLK + i]);
+    a2[i] = q13_center_i64(a->coeffs[2 * TOOM4_BLK + i]);
+    a3[i] = q13_center_i64(a->coeffs[3 * TOOM4_BLK + i]);
+
+    b0[i] = q13_center_i64(b->coeffs[i]);
+    b1[i] = q13_center_i64(b->coeffs[TOOM4_BLK + i]);
+    b2[i] = q13_center_i64(b->coeffs[2 * TOOM4_BLK + i]);
+    b3[i] = q13_center_i64(b->coeffs[3 * TOOM4_BLK + i]);
+
+    ae0[i] = a0[i];
+    ae1[i] = a0[i] + a1[i] + a2[i] + a3[i];
+    aem1[i] = a0[i] - a1[i] + a2[i] - a3[i];
+    ae2[i] = a0[i] + 2 * a1[i] + 4 * a2[i] + 8 * a3[i];
+    aem2[i] = a0[i] - 2 * a1[i] + 4 * a2[i] - 8 * a3[i];
+    ae3[i] = a0[i] + 3 * a1[i] + 9 * a2[i] + 27 * a3[i];
+    aeinf[i] = a3[i];
+
+    be0[i] = b0[i];
+    be1[i] = b0[i] + b1[i] + b2[i] + b3[i];
+    bem1[i] = b0[i] - b1[i] + b2[i] - b3[i];
+    be2[i] = b0[i] + 2 * b1[i] + 4 * b2[i] + 8 * b3[i];
+    bem2[i] = b0[i] - 2 * b1[i] + 4 * b2[i] - 8 * b3[i];
+    be3[i] = b0[i] + 3 * b1[i] + 9 * b2[i] + 27 * b3[i];
+    beinf[i] = b3[i];
+  }
+
+  mul32_karatsuba_i64(v0, ae0, be0);
+  mul32_karatsuba_i64(v1, ae1, be1);
+  mul32_karatsuba_i64(vm1, aem1, bem1);
+  mul32_karatsuba_i64(v2, ae2, be2);
+  mul32_karatsuba_i64(vm2, aem2, bem2);
+  mul32_karatsuba_i64(v3, ae3, be3);
+  mul32_karatsuba_i64(vinf, aeinf, beinf);
+
+  for(unsigned int i = 0; i < TOOM4_FULL_PROD; i++) {
+    full[i] = 0;
+  }
+
+  for(unsigned int t = 0; t < TOOM4_MID_PROD; t++) {
+    int64_t c0 = v0[t];
+    int64_t c6 = vinf[t];
+    int64_t c1 = divexact_i64(-40 * v0[t] + 120 * v1[t] - 60 * vm1[t]
+                              - 30 * v2[t] + 6 * vm2[t] + 4 * v3[t]
+                              - 1440 * vinf[t], 120);
+    int64_t c2 = divexact_i64(-150 * v0[t] + 80 * v1[t] + 80 * vm1[t]
+                              - 5 * v2[t] - 5 * vm2[t]
+                              + 480 * vinf[t], 120);
+    int64_t c3 = divexact_i64(50 * v0[t] - 70 * v1[t] - 5 * vm1[t]
+                              + 35 * v2[t] - 5 * vm2[t] - 5 * v3[t]
+                              + 1800 * vinf[t], 120);
+    int64_t c4 = divexact_i64(30 * v0[t] - 20 * v1[t] - 20 * vm1[t]
+                              + 5 * v2[t] + 5 * vm2[t]
+                              - 600 * vinf[t], 120);
+    int64_t c5 = divexact_i64(-10 * v0[t] + 10 * v1[t] + 5 * vm1[t]
+                              - 5 * v2[t] - vm2[t] + v3[t]
+                              - 360 * vinf[t], 120);
+
+    full[t] += c0;
+    full[TOOM4_BLK + t] += c1;
+    full[2 * TOOM4_BLK + t] += c2;
+    full[3 * TOOM4_BLK + t] += c3;
+    full[4 * TOOM4_BLK + t] += c4;
+    full[5 * TOOM4_BLK + t] += c5;
+    full[6 * TOOM4_BLK + t] += c6;
+  }
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    int64_t x = full[i];
+
+    if(i + RRLWR_N < TOOM4_FULL_PROD) {
+      x -= full[i + RRLWR_N];
+    }
+
+    r->coeffs[i] = q13_reduce_u(x);
+  }
+}
+
+void poly_mul_q13(poly *r, const poly *a, const poly *b) {
+  poly_mul_q13_toom4x32_karatsuba(r, a, b);
+}
+
+void poly_macc_q13(poly *acc, const poly *a, const poly *b) {
+  poly t;
+
+  poly_mul_q13(&t, a, b);
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    acc->coeffs[i] = mod_q13_u((int64_t)acc->coeffs[i] + t.coeffs[i]);
   }
 }
 

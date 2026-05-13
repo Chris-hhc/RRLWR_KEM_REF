@@ -54,18 +54,18 @@ uint8_t ct_cmp(const unsigned char *c1, const unsigned char *c2) {
 int pke_keygen(unsigned char pk[RRLWR_PKE_PK_LEN], unsigned char sk[RRLWR_PKE_SK_LEN],
                const unsigned char seedA[RRLWR_PKE_SEED_A_LEN], const unsigned char seedS[RRLWR_SEED_S_LEN]) {
 
-  ring_element_Awin_ntt a;
+  ring_element_Awin_q13 a;
   ring_element s, b;
 
   // Generate a with coefficients in [-q/2+1, q/2]
-  ring_uniform_Awin_ntt(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN, RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV, RRLWR_KEM_RMODPRIME, RRLWR_KEM_2RMODPRIME, rrlwr_pke_zetas);
+  ring_uniform_Awin_q13(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN);
 
   // Generate s with coefficients in [-2, 1] and pack
   ring_uniform(&s, RRLWR_PKE_LOG_ETA+1, seedS, RRLWR_SEED_S_LEN);
   ring_pack(sk, &s, RRLWR_PKE_LOG_ETA+1);
 
   // Compute A*s
-  ring_mul32_Awin(b.x, &a, &s, RRLWR_K, RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV, RRLWR_NTTINV_FINALCONST, rrlwr_pke_zetas);
+  ring_mul_q13_Awin(b.x, &a, &s, RRLWR_K);
 
   // Compute b = round(p/q*A*s) computed as (A*s + q/(2*p)) >> (eq - ep)
   ring_round_xtoy(&b, &b, RRLWR_PKE_LOGQ, RRLWR_PKE_LOGP);
@@ -82,27 +82,26 @@ int pke_keygen(unsigned char pk[RRLWR_PKE_PK_LEN], unsigned char sk[RRLWR_PKE_SK
 int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR_PKE_PK_LEN],
                 const unsigned char m[RRLWR_PKE_MESSAGE_LEN], const unsigned char seedSp[RRLWR_SEED_S_LEN]) {
 
-  ring_element_Awin_ntt a;
+  ring_element_Awin_q13 a;
   ring_element sp, b, bp;
   poly vp[RRLWR_PKE_ELL];
   const unsigned char *seedA = &pk[0];
 
   // Generate a with coefficients in [-q/2+1, q/2]
-  ring_uniform_Awin_ntt(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN, RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV, RRLWR_KEM_RMODPRIME, RRLWR_KEM_2RMODPRIME, rrlwr_pke_zetas);
+  ring_uniform_Awin_q13(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN);
 
   // Generate s_prime with coefficients in [-2, 1]
   ring_uniform(&sp, RRLWR_PKE_LOG_ETA+1, seedSp, RRLWR_SEED_S_LEN);
 
   // Compute A*s_prime
-  ring_mul32_Awin(bp.x, &a, &sp, RRLWR_K, RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV, RRLWR_NTTINV_FINALCONST, rrlwr_pke_zetas);
+  ring_mul_q13_Awin(bp.x, &a, &sp, RRLWR_K);
 
   // Compute b_prime = round(p/q*A*s_prime)
   ring_round_xtoy(&bp, &bp, RRLWR_PKE_LOGQ, RRLWR_PKE_LOGP);
 
   // Compute v_prime = b*s_prime
   ring_unpack(&b, pk + RRLWR_PKE_SEED_A_LEN, RRLWR_PKE_LOGP);
-  ring_ntt32(&b, RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV, rrlwr_pke_zetas);
-  ring_mul_invntt32(vp, &b, &sp, RRLWR_PKE_ELL, RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV, RRLWR_NTTINV_FINALCONST, RRLWR_KEM_RMODPRIME, RRLWR_KEM_2RMODPRIME, rrlwr_pke_zetas); // Do not repeat NTT(s)
+  ring_mul_q13(vp, &b, &sp, RRLWR_PKE_ELL);
 
   // Convert message to polynomial representation and compute (v_prime + q/(2*p) + p/2*m) mod p
   poly_add_msg(vp, m);
@@ -134,7 +133,7 @@ int pke_decrypt(unsigned char m[RRLWR_PKE_MESSAGE_LEN],
   }
 
   // Compute v = b_prime*s
-  ring_mul32(v, &bp, &s, RRLWR_PKE_ELL, RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV, RRLWR_NTTINV_FINALCONST, RRLWR_KEM_RMODPRIME, RRLWR_KEM_2RMODPRIME, rrlwr_pke_zetas); 
+  ring_mul_q13(v, &bp, &s, RRLWR_PKE_ELL);
 
   for(unsigned int i = 0; i < RRLWR_PKE_ELL; i++) {
     poly_subp(&v[i], &v[i], &cm[i]);                     // Compute (v - (p/t)*cm) mod p

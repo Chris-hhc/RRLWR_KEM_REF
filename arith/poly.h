@@ -28,9 +28,26 @@ extern "C"
     int32_t coeffs[RRLWR_N];
   } poly;
 
+  static inline int32_t mod_q13_u(int64_t x) {
+    return (int32_t)((uint64_t)x & RRLWR_Q_MASK);
+  }
+
+  static inline int32_t mod_q13_centered(int64_t x) {
+    int32_t y = mod_q13_u(x);
+    if(y > (RRLWR_Q >> 1)) {
+      y -= RRLWR_Q;
+    }
+    return y;
+  }
+
   void poly_ntt32(poly *f, int32_t prime, int32_t primeinv, int32_t fp_zetas[RRLWR_N]);
   void poly_invntt32(poly *f, int32_t prime, int32_t primeinv, int32_t finalconst, int32_t fp_zetas[RRLWR_N]);
   void poly_basemul32(poly *r, const poly *f, const poly *g, int32_t prime, int32_t primeinv);
+  void poly_mul_yplus2_q13(poly *r, const poly *a);
+  void poly_mul_q13_schoolbook(poly *r, const poly *a, const poly *b);
+  void poly_mul_q13_toom4x32_karatsuba(poly *r, const poly *a, const poly *b);
+  void poly_mul_q13(poly *r, const poly *a, const poly *b);
+  void poly_macc_q13(poly *acc, const poly *a, const poly *b);
   void poly_add32(poly *r, const poly *f, const poly *g, int32_t prime);
   void poly_add(poly *r, poly *f, poly *g);
   void poly_sub32(poly *r, poly *f, poly *g, int32_t prime);

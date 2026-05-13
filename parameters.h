@@ -57,6 +57,9 @@ extern "C"
 
   #define RRLWR_PKE_SEED_A_LEN        (64)
   #define RRLWR_SEED_S_LEN            (64)
+  #define RRLWR_Q_BITS                (13)
+  #define RRLWR_Q                     ((int32_t)1 << RRLWR_Q_BITS)
+  #define RRLWR_Q_MASK                (RRLWR_Q - 1)
   #define RRLWR_PKE_P                 ((int32_t)1 << RRLWR_PKE_LOGP)
   #define RRLWR_PKE_PACKED_POLYQ_LEN  (RRLWR_PKE_LOGQ*RRLWR_N/8)
   #define RRLWR_PKE_PACKED_POLYP_LEN  (RRLWR_PKE_LOGP*RRLWR_N/8)
