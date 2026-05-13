@@ -1,0 +1,22 @@
+# Build outputs
+output/
+
+# Test binaries
+test/test_KEM*
+test/unit_tests_KEM*
+test/test_speed_KEM*
+test/profile_KEM*
+
+# KAT binaries
+KAT/KAT_KEM*
+
+# Local profiling / perf artifacts
+test/perf.data
+perf.data
+
+# Common object and dependency files
+*.o
+*.obj
+*.a
+*.so
+*.d
