@@ -62,10 +62,12 @@ int pke_keygen(unsigned char pk[RRLWR_PKE_PK_LEN], unsigned char sk[RRLWR_PKE_SK
 
   // Generate s with coefficients in [-2, 1] and pack
   ring_uniform(&s, RRLWR_PKE_LOG_ETA+1, seedS, RRLWR_SEED_S_LEN);
-  ring_pack(sk, &s, RRLWR_PKE_LOG_ETA+1);
 
   // Compute A*s
-  ring_mul_q13_Awin(b.x, &a, &s, RRLWR_K);
+  ring_mul_q13_Awin_smallsecret(b.x, &a, &s, RRLWR_K);
+
+  // Pack the secret key
+  ring_pack(sk, &s, RRLWR_PKE_LOG_ETA+1);
 
   // Compute b = round(p/q*A*s) computed as (A*s + q/(2*p)) >> (eq - ep)
   ring_round_xtoy(&b, &b, RRLWR_PKE_LOGQ, RRLWR_PKE_LOGP);
@@ -83,6 +85,7 @@ int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR
                 const unsigned char m[RRLWR_PKE_MESSAGE_LEN], const unsigned char seedSp[RRLWR_SEED_S_LEN]) {
 
   ring_element_Awin_q13 a;
+  ring_element_Awin_q13 bw;
   ring_element sp, b, bp;
   poly vp[RRLWR_PKE_ELL];
   const unsigned char *seedA = &pk[0];
@@ -94,14 +97,15 @@ int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR
   ring_uniform(&sp, RRLWR_PKE_LOG_ETA+1, seedSp, RRLWR_SEED_S_LEN);
 
   // Compute A*s_prime
-  ring_mul_q13_Awin(bp.x, &a, &sp, RRLWR_K);
+  ring_mul_q13_Awin_smallsecret(bp.x, &a, &sp, RRLWR_K);
 
   // Compute b_prime = round(p/q*A*s_prime)
   ring_round_xtoy(&bp, &bp, RRLWR_PKE_LOGQ, RRLWR_PKE_LOGP);
 
   // Compute v_prime = b*s_prime
   ring_unpack(&b, pk + RRLWR_PKE_SEED_A_LEN, RRLWR_PKE_LOGP);
-  ring_mul_q13(vp, &b, &sp, RRLWR_PKE_ELL);
+  ring_to_Awin_q13(&bw, &b);
+  ring_mul_q13_Awin_smallsecret(vp, &bw, &sp, RRLWR_PKE_ELL);
 
   // Convert message to polynomial representation and compute (v_prime + q/(2*p) + p/2*m) mod p
   poly_add_msg(vp, m);
@@ -120,7 +124,8 @@ int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR
 
 int pke_decrypt(unsigned char m[RRLWR_PKE_MESSAGE_LEN], 
                 const unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char sk[RRLWR_PKE_SK_LEN]) {
-  ring_element bp, s; 
+  ring_element bp, s;
+  ring_element_Awin_q13 bpw;
   poly v[RRLWR_PKE_ELL];
   poly cm[RRLWR_PKE_ELL];
 
@@ -133,7 +138,8 @@ int pke_decrypt(unsigned char m[RRLWR_PKE_MESSAGE_LEN],
   }
 
   // Compute v = b_prime*s
-  ring_mul_q13(v, &bp, &s, RRLWR_PKE_ELL);
+  ring_to_Awin_q13(&bpw, &bp);
+  ring_mul_q13_Awin_smallsecret(v, &bpw, &s, RRLWR_PKE_ELL);
 
   for(unsigned int i = 0; i < RRLWR_PKE_ELL; i++) {
     poly_subp(&v[i], &v[i], &cm[i]);                     // Compute (v - (p/t)*cm) mod p

@@ -40,6 +40,22 @@ extern "C"
     return y;
   }
 
+  static inline int32_t q13_reduce_u_i64(int64_t x) {
+    return (int32_t)((uint64_t)x & RRLWR_Q_MASK);
+  }
+
+  static inline int32_t q13_center_i32(int32_t x) {
+    int32_t y = x & RRLWR_Q_MASK;
+    if(y > (RRLWR_Q >> 1)) {
+      y -= RRLWR_Q;
+    }
+    return y;
+  }
+
+  static inline int32_t q13_small_secret_i32(int32_t x) {
+    return q13_center_i32(x);
+  }
+
   void poly_ntt32(poly *f, int32_t prime, int32_t primeinv, int32_t fp_zetas[RRLWR_N]);
   void poly_invntt32(poly *f, int32_t prime, int32_t primeinv, int32_t finalconst, int32_t fp_zetas[RRLWR_N]);
   void poly_basemul32(poly *r, const poly *f, const poly *g, int32_t prime, int32_t primeinv);
@@ -48,6 +64,7 @@ extern "C"
   void poly_mul_q13_toom4x32_karatsuba(poly *r, const poly *a, const poly *b);
   void poly_mul_q13(poly *r, const poly *a, const poly *b);
   void poly_macc_q13(poly *acc, const poly *a, const poly *b);
+  void poly_macc_q13_smallsecret(poly *acc, const poly *dense, const poly *small);
   void poly_add32(poly *r, const poly *f, const poly *g, int32_t prime);
   void poly_add(poly *r, poly *f, poly *g);
   void poly_sub32(poly *r, poly *f, poly *g, int32_t prime);

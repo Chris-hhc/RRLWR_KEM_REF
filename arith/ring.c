@@ -17,6 +17,11 @@
 #include "ring.h"
 #include "uniform.h"
 
+#ifndef NDEBUG
+#include <stdio.h>
+#include <stdlib.h>
+#endif
+
 /// @brief Compute NTT(y+2) in Montgomery domain, on-the-fly only if PRECOMPUTE_TWIST is not defined
 static void compute_yp2(poly *r, int32_t prime, int32_t primeinv, int32_t fp_zetas[RRLWR_N], int32_t oneR, int32_t twoR)
 {
@@ -390,6 +395,136 @@ void ring_mul_q13(poly *r,
 
   ring_to_Awin_q13(&aw, a);
   ring_mul_q13_Awin(r, &aw, b, ncoeffs);
+}
+
+static void ring_row_macc_q13_Awin_smallsecret(poly *out,
+                                               const int32_t (*row)[RRLWR_N],
+                                               const uint16_t idx_p1[RRLWR_K][RRLWR_N],
+                                               const uint16_t idx_m1[RRLWR_K][RRLWR_N],
+                                               const uint16_t idx_p2[RRLWR_K][RRLWR_N],
+                                               const uint16_t idx_m2[RRLWR_K][RRLWR_N],
+                                               const unsigned int count_p1[RRLWR_K],
+                                               const unsigned int count_m1[RRLWR_K],
+                                               const unsigned int count_p2[RRLWR_K],
+                                               const unsigned int count_m2[RRLWR_K]) {
+  int32_t acc[RRLWR_N];
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    acc[i] = 0;
+  }
+
+  /*
+   * This ref fast path branches on small secret coefficients; replace with
+   * constant-time masks if required.
+   */
+  for(unsigned int j = 0; j < RRLWR_K; j++) {
+    for(unsigned int l = 0; l < count_p1[j]; l++) {
+      unsigned int c = idx_p1[j][l];
+
+      for(unsigned int t = 0; t < RRLWR_N - c; t++) {
+        acc[t + c] += row[j][t];
+      }
+      for(unsigned int t = RRLWR_N - c; t < RRLWR_N; t++) {
+        acc[t + c - RRLWR_N] -= row[j][t];
+      }
+    }
+
+    for(unsigned int l = 0; l < count_m1[j]; l++) {
+      unsigned int c = idx_m1[j][l];
+
+      for(unsigned int t = 0; t < RRLWR_N - c; t++) {
+        acc[t + c] -= row[j][t];
+      }
+      for(unsigned int t = RRLWR_N - c; t < RRLWR_N; t++) {
+        acc[t + c - RRLWR_N] += row[j][t];
+      }
+    }
+
+    for(unsigned int l = 0; l < count_p2[j]; l++) {
+      unsigned int c = idx_p2[j][l];
+
+      for(unsigned int t = 0; t < RRLWR_N - c; t++) {
+        acc[t + c] += row[j][t] << 1;
+      }
+      for(unsigned int t = RRLWR_N - c; t < RRLWR_N; t++) {
+        acc[t + c - RRLWR_N] -= row[j][t] << 1;
+      }
+    }
+
+    for(unsigned int l = 0; l < count_m2[j]; l++) {
+      unsigned int c = idx_m2[j][l];
+
+      for(unsigned int t = 0; t < RRLWR_N - c; t++) {
+        acc[t + c] -= row[j][t] << 1;
+      }
+      for(unsigned int t = RRLWR_N - c; t < RRLWR_N; t++) {
+        acc[t + c - RRLWR_N] += row[j][t] << 1;
+      }
+    }
+  }
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    out->coeffs[i] = q13_reduce_u_i64(acc[i]);
+  }
+}
+
+void ring_mul_q13_Awin_smallsecret(poly *r,
+                                   const ring_element_Awin_q13 *a,
+                                   const ring_element *s,
+                                   int ncoeffs) {
+  int32_t awc[RRLWR_K + ncoeffs - 1][RRLWR_N];
+  uint16_t idx_p1[RRLWR_K][RRLWR_N];
+  uint16_t idx_m1[RRLWR_K][RRLWR_N];
+  uint16_t idx_p2[RRLWR_K][RRLWR_N];
+  uint16_t idx_m2[RRLWR_K][RRLWR_N];
+  unsigned int count_p1[RRLWR_K];
+  unsigned int count_m1[RRLWR_K];
+  unsigned int count_p2[RRLWR_K];
+  unsigned int count_m2[RRLWR_K];
+  int row_min = RRLWR_K - ncoeffs;
+
+  for(unsigned int w = 0; w < RRLWR_K + (unsigned int)ncoeffs - 1; w++) {
+    for(unsigned int c = 0; c < RRLWR_N; c++) {
+      awc[w][c] = q13_center_i32(a->x[w].coeffs[c]);
+    }
+  }
+
+  for(unsigned int j = 0; j < RRLWR_K; j++) {
+    count_p1[j] = 0;
+    count_m1[j] = 0;
+    count_p2[j] = 0;
+    count_m2[j] = 0;
+
+    for(unsigned int c = 0; c < RRLWR_N; c++) {
+      int32_t sc = q13_small_secret_i32(s->x[j].coeffs[c]);
+
+#ifndef NDEBUG
+      if(!(sc == -2 || sc == -1 || sc == 0 || sc == 1 || sc == 2)) {
+        fprintf(stderr, "ring_mul_q13_Awin_smallsecret: non-small coeff %d\n", sc);
+        abort();
+      }
+#endif
+
+      if(sc == 1) {
+        idx_p1[j][count_p1[j]++] = (uint16_t)c;
+      } else if(sc == -1) {
+        idx_m1[j][count_m1[j]++] = (uint16_t)c;
+      } else if(sc == 2) {
+        idx_p2[j][count_p2[j]++] = (uint16_t)c;
+      } else if(sc == -2) {
+        idx_m2[j][count_m2[j]++] = (uint16_t)c;
+      }
+    }
+  }
+
+  for(int i = RRLWR_K - 1; i >= row_min; i--) {
+    int out = i - row_min;
+    const int32_t (*row)[RRLWR_N] = &awc[RRLWR_K - 1 - i];
+
+    ring_row_macc_q13_Awin_smallsecret(&r[out], row,
+                                       idx_p1, idx_m1, idx_p2, idx_m2,
+                                       count_p1, count_m1, count_p2, count_m2);
+  }
 }
 
 void ring_round_xtoy(ring_element *r, const ring_element *f, int32_t x, int32_t y) {

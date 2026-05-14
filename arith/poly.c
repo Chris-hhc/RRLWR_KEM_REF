@@ -284,6 +284,69 @@ void poly_macc_q13(poly *acc, const poly *a, const poly *b) {
   }
 }
 
+void poly_macc_q13_smallsecret(poly *acc, const poly *dense, const poly *small) {
+  int64_t tmp[RRLWR_N];
+  int32_t dense_c[RRLWR_N];
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    tmp[i] = q13_center_i32(acc->coeffs[i]);
+    dense_c[i] = q13_center_i32(dense->coeffs[i]);
+  }
+
+  /*
+   * This ref fast path branches on small secret coefficients; replace with
+   * constant-time masks if required.
+   */
+  for(unsigned int c = 0; c < RRLWR_N; c++) {
+    int32_t sc = q13_small_secret_i32(small->coeffs[c]);
+
+#ifndef NDEBUG
+    if(!(sc == -2 || sc == -1 || sc == 0 || sc == 1 || sc == 2)) {
+      fprintf(stderr, "poly_macc_q13_smallsecret: non-small coeff %d\n", sc);
+      abort();
+    }
+#endif
+
+    if(sc == 0) {
+      continue;
+    }
+
+    if(sc == 1) {
+      for(unsigned int t = 0; t < RRLWR_N - c; t++) {
+        tmp[t + c] += dense_c[t];
+      }
+      for(unsigned int t = RRLWR_N - c; t < RRLWR_N; t++) {
+        tmp[t + c - RRLWR_N] -= dense_c[t];
+      }
+    } else if(sc == -1) {
+      for(unsigned int t = 0; t < RRLWR_N - c; t++) {
+        tmp[t + c] -= dense_c[t];
+      }
+      for(unsigned int t = RRLWR_N - c; t < RRLWR_N; t++) {
+        tmp[t + c - RRLWR_N] += dense_c[t];
+      }
+    } else if(sc == 2) {
+      for(unsigned int t = 0; t < RRLWR_N - c; t++) {
+        tmp[t + c] += 2LL * dense_c[t];
+      }
+      for(unsigned int t = RRLWR_N - c; t < RRLWR_N; t++) {
+        tmp[t + c - RRLWR_N] -= 2LL * dense_c[t];
+      }
+    } else {
+      for(unsigned int t = 0; t < RRLWR_N - c; t++) {
+        tmp[t + c] -= 2LL * dense_c[t];
+      }
+      for(unsigned int t = RRLWR_N - c; t < RRLWR_N; t++) {
+        tmp[t + c - RRLWR_N] += 2LL * dense_c[t];
+      }
+    }
+  }
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    acc->coeffs[i] = q13_reduce_u_i64(tmp[i]);
+  }
+}
+
 void poly_add32(poly *r, const poly *f, const poly *g, int32_t prime) {
   for(unsigned int i = 0; i < RRLWR_N; i++) {
     r->coeffs[i] = add32(f->coeffs[i], g->coeffs[i], prime);
