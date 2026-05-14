@@ -18,6 +18,7 @@
 #define PARAMETERS_H
 
 #include <stdint.h>
+#include "fips202.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -80,15 +81,28 @@ extern "C"
   #define RRLWR_KEM_PK_LEN            (RRLWR_PKE_PK_LEN)
   #define RRLWR_KEM_CT_LEN            (RRLWR_PKE_CT_LEN)
 
+  #define RRLWR_MUL_MODE_NTT          0
+  #define RRLWR_MUL_MODE_TOOM         1
+  #define RRLWR_MUL_MODE_SMALLSECRET  2
+  #define RRLWR_MUL_MODE_SMALLSECRET_CT 3
+
+  #ifndef RRLWR_MUL_MODE
+    #define RRLWR_MUL_MODE RRLWR_MUL_MODE_NTT
+  #endif
+
+  #if RRLWR_MUL_MODE < RRLWR_MUL_MODE_NTT || RRLWR_MUL_MODE > RRLWR_MUL_MODE_SMALLSECRET_CT
+    #error "RRLWR_MUL_MODE must be 0 (NTT), 1 (Toom), 2 (smallsecret), or 3 (CT smallsecret)"
+  #endif
+
   // Define hash functions
   #define RRLWR_XOF(output, output_len, input, input_len) \
-          pseudoXOF(8*(output_len), input, 8*(input_len), output)
+          shake128(output, output_len, input, input_len)
   #define RRLWR_KEM_HASH_F(output, input, input_len) \
-          pseudoXOF(8*(RRLWR_KEM_HPK_LEN), input, 8*(input_len), output)
+          shake256(output, RRLWR_KEM_HPK_LEN, input, input_len)
   #define RRLWR_KEM_HASH_G(output, output_len, input, input_len) \
-          pseudoXOF(8*(output_len), input, 8*(input_len), output)
+          shake256(output, output_len, input, input_len)
   #define RRLWR_KEM_HASH_H(output, output_len, input, input_len) \
-          pseudoXOF(8*(output_len), input, 8*(input_len), output)
+          shake256(output, output_len, input, input_len)
   #define GENERATE_RANDOM_BYTES(output, output_len, ctx) \
           get_random_number(ctx, output, 8*(output_len))
 

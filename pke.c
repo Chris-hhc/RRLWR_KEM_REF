@@ -54,20 +54,40 @@ uint8_t ct_cmp(const unsigned char *c1, const unsigned char *c2) {
 int pke_keygen(unsigned char pk[RRLWR_PKE_PK_LEN], unsigned char sk[RRLWR_PKE_SK_LEN],
                const unsigned char seedA[RRLWR_PKE_SEED_A_LEN], const unsigned char seedS[RRLWR_SEED_S_LEN]) {
 
+#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+  ring_element a;
+#else
   ring_element_Awin_q13 a;
+#endif
   ring_element s, b;
 
   // Generate a with coefficients in [-q/2+1, q/2]
+#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+  ring_uniform(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN);
+#else
   ring_uniform_Awin_q13(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN);
+#endif
 
   // Generate s with coefficients in [-2, 1] and pack
   ring_uniform(&s, RRLWR_PKE_LOG_ETA+1, seedS, RRLWR_SEED_S_LEN);
 
-  // Compute A*s
-  ring_mul_q13_Awin_smallsecret(b.x, &a, &s, RRLWR_K);
-
-  // Pack the secret key
+  // Pack the secret key before any multiplication path can transform s.
   ring_pack(sk, &s, RRLWR_PKE_LOG_ETA+1);
+
+  // Compute A*s
+#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+  ring_mul32(b.x, &a, &s, RRLWR_K,
+             RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
+             RRLWR_NTTINV_FINALCONST,
+             RRLWR_KEM_RMODPRIME, RRLWR_KEM_2RMODPRIME,
+             rrlwr_pke_zetas);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_TOOM
+  ring_mul_q13_Awin(b.x, &a, &s, RRLWR_K);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_SMALLSECRET
+  ring_mul_q13_Awin_smallsecret(b.x, &a, &s, RRLWR_K);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_SMALLSECRET_CT
+  ring_mul_q13_Awin_smallsecret_ct(b.x, &a, &s, RRLWR_K);
+#endif
 
   // Compute b = round(p/q*A*s) computed as (A*s + q/(2*p)) >> (eq - ep)
   ring_round_xtoy(&b, &b, RRLWR_PKE_LOGQ, RRLWR_PKE_LOGP);
@@ -84,28 +104,63 @@ int pke_keygen(unsigned char pk[RRLWR_PKE_PK_LEN], unsigned char sk[RRLWR_PKE_SK
 int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR_PKE_PK_LEN],
                 const unsigned char m[RRLWR_PKE_MESSAGE_LEN], const unsigned char seedSp[RRLWR_SEED_S_LEN]) {
 
+#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+  ring_element a;
+#else
   ring_element_Awin_q13 a;
   ring_element_Awin_q13 bw;
+#endif
   ring_element sp, b, bp;
   poly vp[RRLWR_PKE_ELL];
   const unsigned char *seedA = &pk[0];
 
   // Generate a with coefficients in [-q/2+1, q/2]
+#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+  ring_uniform(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN);
+#else
   ring_uniform_Awin_q13(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN);
+#endif
 
   // Generate s_prime with coefficients in [-2, 1]
   ring_uniform(&sp, RRLWR_PKE_LOG_ETA+1, seedSp, RRLWR_SEED_S_LEN);
 
   // Compute A*s_prime
+#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+  ring_mul32(bp.x, &a, &sp, RRLWR_K,
+             RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
+             RRLWR_NTTINV_FINALCONST,
+             RRLWR_KEM_RMODPRIME, RRLWR_KEM_2RMODPRIME,
+             rrlwr_pke_zetas);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_TOOM
+  ring_mul_q13_Awin(bp.x, &a, &sp, RRLWR_K);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_SMALLSECRET
   ring_mul_q13_Awin_smallsecret(bp.x, &a, &sp, RRLWR_K);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_SMALLSECRET_CT
+  ring_mul_q13_Awin_smallsecret_ct(bp.x, &a, &sp, RRLWR_K);
+#endif
 
   // Compute b_prime = round(p/q*A*s_prime)
   ring_round_xtoy(&bp, &bp, RRLWR_PKE_LOGQ, RRLWR_PKE_LOGP);
 
   // Compute v_prime = b*s_prime
   ring_unpack(&b, pk + RRLWR_PKE_SEED_A_LEN, RRLWR_PKE_LOGP);
+#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+  ring_ntt32(&b, RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV, rrlwr_pke_zetas);
+  ring_mul_invntt32(vp, &b, &sp, RRLWR_PKE_ELL,
+                    RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
+                    RRLWR_NTTINV_FINALCONST,
+                    RRLWR_KEM_RMODPRIME, RRLWR_KEM_2RMODPRIME,
+                    rrlwr_pke_zetas);
+#else
   ring_to_Awin_q13(&bw, &b);
+#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_TOOM
+  ring_mul_q13_Awin(vp, &bw, &sp, RRLWR_PKE_ELL);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_SMALLSECRET
   ring_mul_q13_Awin_smallsecret(vp, &bw, &sp, RRLWR_PKE_ELL);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_SMALLSECRET_CT
+  ring_mul_q13_Awin_smallsecret_ct(vp, &bw, &sp, RRLWR_PKE_ELL);
+#endif
+#endif
 
   // Convert message to polynomial representation and compute (v_prime + q/(2*p) + p/2*m) mod p
   poly_add_msg(vp, m);
@@ -125,7 +180,9 @@ int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR
 int pke_decrypt(unsigned char m[RRLWR_PKE_MESSAGE_LEN], 
                 const unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char sk[RRLWR_PKE_SK_LEN]) {
   ring_element bp, s;
+#if RRLWR_MUL_MODE != RRLWR_MUL_MODE_NTT
   ring_element_Awin_q13 bpw;
+#endif
   poly v[RRLWR_PKE_ELL];
   poly cm[RRLWR_PKE_ELL];
 
@@ -138,8 +195,22 @@ int pke_decrypt(unsigned char m[RRLWR_PKE_MESSAGE_LEN],
   }
 
   // Compute v = b_prime*s
+#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+  ring_mul32(v, &bp, &s, RRLWR_PKE_ELL,
+             RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
+             RRLWR_NTTINV_FINALCONST,
+             RRLWR_KEM_RMODPRIME, RRLWR_KEM_2RMODPRIME,
+             rrlwr_pke_zetas);
+#else
   ring_to_Awin_q13(&bpw, &bp);
+#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_TOOM
+  ring_mul_q13_Awin(v, &bpw, &s, RRLWR_PKE_ELL);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_SMALLSECRET
   ring_mul_q13_Awin_smallsecret(v, &bpw, &s, RRLWR_PKE_ELL);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_SMALLSECRET_CT
+  ring_mul_q13_Awin_smallsecret_ct(v, &bpw, &s, RRLWR_PKE_ELL);
+#endif
+#endif
 
   for(unsigned int i = 0; i < RRLWR_PKE_ELL; i++) {
     poly_subp(&v[i], &v[i], &cm[i]);                     // Compute (v - (p/t)*cm) mod p

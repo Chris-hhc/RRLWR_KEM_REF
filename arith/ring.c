@@ -527,6 +527,129 @@ void ring_mul_q13_Awin_smallsecret(poly *r,
   }
 }
 
+static inline int32_t ct_mask_eq_i32(int32_t x, int32_t y) {
+  uint32_t v = (uint32_t)(x ^ y);
+
+  /*
+   * Return 0xffffffff if x == y, otherwise 0x00000000.
+   */
+  v = (v | (uint32_t)(0u - v)) >> 31;
+  return -(int32_t)(v ^ 1u);
+}
+
+/*
+ * CT shifted MAC for sc in {-2,-1,0,1,2}.
+ *
+ * The masks depend on sc, but they are computed once per secret coefficient c,
+ * not once per dense coefficient t.
+ */
+static inline void acc_shift_smallsecret_ct_scalar(int32_t acc[RRLWR_N],
+                                                   const int32_t dense[RRLWR_N],
+                                                   unsigned int c,
+                                                   int32_t sc) {
+  unsigned int split = RRLWR_N - c;
+
+  int32_t m_p1 = ct_mask_eq_i32(sc,  1);
+  int32_t m_m1 = ct_mask_eq_i32(sc, -1);
+  int32_t m_p2 = ct_mask_eq_i32(sc,  2);
+  int32_t m_m2 = ct_mask_eq_i32(sc, -2);
+
+  for(unsigned int t = 0; t < split; t++) {
+    int32_t d = dense[t];
+    int32_t d2 = d + d;
+
+    int32_t term = 0;
+    term += d  & m_p1;
+    term -= d  & m_m1;
+    term += d2 & m_p2;
+    term -= d2 & m_m2;
+
+    acc[t + c] += term;
+  }
+
+  for(unsigned int t = split; t < RRLWR_N; t++) {
+    int32_t d = dense[t];
+    int32_t d2 = d + d;
+
+    int32_t term = 0;
+    term += d  & m_p1;
+    term -= d  & m_m1;
+    term += d2 & m_p2;
+    term -= d2 & m_m2;
+
+    acc[t + c - RRLWR_N] -= term;
+  }
+}
+static void ring_row_macc_q13_Awin_smallsecret_ct(poly *out,
+                                                  const int32_t (*row)[RRLWR_N],
+                                                  const int32_t swc[RRLWR_K][RRLWR_N]) {
+  int32_t acc[RRLWR_N];
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    acc[i] = 0;
+  }
+
+  /*
+   * Fixed loop structure:
+   *   j = 0..K-1
+   *   c = 0..N-1
+   *
+   * No skip for sc == 0 and no branch on sc.
+   */
+  for(unsigned int j = 0; j < RRLWR_K; j++) {
+    for(unsigned int c = 0; c < RRLWR_N; c++) {
+      acc_shift_smallsecret_ct_scalar(acc, row[j], c, swc[j][c]);
+    }
+  }
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    out->coeffs[i] = q13_reduce_u_i32(acc[i]);
+  }
+}
+
+void ring_mul_q13_Awin_smallsecret_ct(poly *r,
+                                      const ring_element_Awin_q13 *a,
+                                      const ring_element *s,
+                                      int ncoeffs) {
+  int32_t awc[2 * RRLWR_K - 1][RRLWR_N];
+  int32_t swc[RRLWR_K][RRLWR_N];
+  int row_min = RRLWR_K - ncoeffs;
+
+  /*
+   * Center Awin coefficients once.
+   * Awin is public-derived or dense public data; layout remains sliding-window:
+   *   [a[k-1], ..., a[0], theta*a[k-1], ..., theta*a[1]]
+   */
+  for(unsigned int w = 0; w < 2 * RRLWR_K - 1; w++) {
+    for(unsigned int c = 0; c < RRLWR_N; c++) {
+      awc[w][c] = q13_center_i32_ct(a->x[w].coeffs[c]);
+    }
+  }
+
+  /*
+   * Center secret coefficients once.
+   * Expected values after centering: {-2, -1, 0, 1}; +2 is also supported
+   * to match the existing non-CT smallsecret interface.
+   */
+  for(unsigned int j = 0; j < RRLWR_K; j++) {
+    for(unsigned int c = 0; c < RRLWR_N; c++) {
+      swc[j][c] = q13_center_i32_ct(s->x[j].coeffs[c]);
+    }
+  }
+
+  /*
+   * Preserve original output order:
+   *   row k-1       -> r[ncoeffs-1]
+   *   row k-ncoeffs -> r[0]
+   */
+  for(int i = RRLWR_K - 1; i >= row_min; i--) {
+    int out = i - row_min;
+    const int32_t (*row)[RRLWR_N] = &awc[RRLWR_K - 1 - i];
+
+    ring_row_macc_q13_Awin_smallsecret_ct(&r[out], row, swc);
+  }
+}
+
 void ring_round_xtoy(ring_element *r, const ring_element *f, int32_t x, int32_t y) {
   for(unsigned int i = 0; i < RRLWR_K; i++) {
     poly_round_xtoy(&r->x[i], &f->x[i], x, y);

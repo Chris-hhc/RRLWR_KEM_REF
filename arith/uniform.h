@@ -18,7 +18,7 @@
 #define UNIFORM_H
 
 #include "parameters.h"
-#include "auxfunc.h"
+#include "fips202.h"
 #include "ring.h"
 #include "packing.h"
 

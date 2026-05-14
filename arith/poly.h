@@ -28,6 +28,9 @@ extern "C"
     int32_t coeffs[RRLWR_N];
   } poly;
 
+#define RRLWR_Q13      8192
+#define RRLWR_Q13_MASK 8191
+
   static inline int32_t mod_q13_u(int64_t x) {
     return (int32_t)((uint64_t)x & RRLWR_Q_MASK);
   }
@@ -44,12 +47,20 @@ extern "C"
     return (int32_t)((uint64_t)x & RRLWR_Q_MASK);
   }
 
+  static inline int32_t q13_reduce_u_i32(int32_t x) {
+    return x & RRLWR_Q13_MASK;
+  }
+
   static inline int32_t q13_center_i32(int32_t x) {
     int32_t y = x & RRLWR_Q_MASK;
     if(y > (RRLWR_Q >> 1)) {
       y -= RRLWR_Q;
     }
     return y;
+  }
+
+  static inline int32_t q13_center_i32_ct(int32_t x) {
+    return ((x + 4096) & RRLWR_Q13_MASK) - 4096;
   }
 
   static inline int32_t q13_small_secret_i32(int32_t x) {
