@@ -179,7 +179,9 @@ void poly_mul_q13_schoolbook(poly *r, const poly *a, const poly *b) {
   }
 }
 
-void poly_mul_q13_toom4x32_karatsuba(poly *r, const poly *a, const poly *b) {
+void poly_macc_q13_toom4x32_karatsuba_i64(int64_t acc[RRLWR_N],
+                                          const poly *a,
+                                          const poly *b) {
   int64_t a0[TOOM4_BLK], a1[TOOM4_BLK], a2[TOOM4_BLK], a3[TOOM4_BLK];
   int64_t b0[TOOM4_BLK], b1[TOOM4_BLK], b2[TOOM4_BLK], b3[TOOM4_BLK];
   int64_t ae0[TOOM4_BLK], ae1[TOOM4_BLK], aem1[TOOM4_BLK];
@@ -266,21 +268,49 @@ void poly_mul_q13_toom4x32_karatsuba(poly *r, const poly *a, const poly *b) {
       x -= full[i + RRLWR_N];
     }
 
-    r->coeffs[i] = q13_reduce_u(x);
+    acc[i] += x;
+  }
+}
+
+void poly_mul_q13_toom4x32_karatsuba(poly *r, const poly *a, const poly *b) {
+  int64_t acc[RRLWR_N];
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    acc[i] = 0;
+  }
+
+  poly_macc_q13_toom4x32_karatsuba_i64(acc, a, b);
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    r->coeffs[i] = q13_reduce_u(acc[i]);
   }
 }
 
 void poly_mul_q13(poly *r, const poly *a, const poly *b) {
-  poly_mul_q13_toom4x32_karatsuba(r, a, b);
+  int64_t acc[RRLWR_N];
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    acc[i] = 0;
+  }
+
+  poly_macc_q13_toom4x32_karatsuba_i64(acc, a, b);
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    r->coeffs[i] = q13_reduce_u(acc[i]);
+  }
 }
 
 void poly_macc_q13(poly *acc, const poly *a, const poly *b) {
-  poly t;
-
-  poly_mul_q13(&t, a, b);
+  int64_t tmp_acc[RRLWR_N];
 
   for(unsigned int i = 0; i < RRLWR_N; i++) {
-    acc->coeffs[i] = mod_q13_u((int64_t)acc->coeffs[i] + t.coeffs[i]);
+    tmp_acc[i] = (int64_t)(acc->coeffs[i] & RRLWR_Q_MASK);
+  }
+
+  poly_macc_q13_toom4x32_karatsuba_i64(tmp_acc, a, b);
+
+  for(unsigned int i = 0; i < RRLWR_N; i++) {
+    acc->coeffs[i] = q13_reduce_u(tmp_acc[i]);
   }
 }
 

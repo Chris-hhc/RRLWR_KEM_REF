@@ -17,6 +17,10 @@
 #include "pke.h"
 
 int32_t rrlwr_pke_zetas[RRLWR_N] = RRLWR_KEM_ZETAS;
+#define RRLWR_MUL_IS_NTT \
+  (RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT || RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT_AWIN)
+#define RRLWR_MUL_IS_NTT_AWIN \
+  (RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT_AWIN)
 #ifdef PRECOMPUTE_TWIST
 int32_t precomputed_twist[RRLWR_N] = {403905201, -403348161, -66371421, 66928461, 133626020, -133068980, -300247038, 300804078, -117505540, 118062580, -347058431, 347615471, 902218, -345178, 390549999, -389992959, 39812103, -39255063, -96655799, 97212839, -172660914, 173217954, -289881212, 290438252, 199364025, -198806985, 2418007, -1860967, -530070296, 530627336, 519621497, -519064457, 93727338, -93170298, 240048030, -239490990, 73001961, -72444921, -300824911, 301381951, 76681729, -76124689, -227812543, 228369583, 94796637, -94239597, -121921241, 122478281, -22994915, 23551955, -148310860, 148867900, 225965532, -225408492, -134941793, 135498833, 227843057, -227286017, -35874344, 36431384, 324335842, -323778802, -250118201, 250675241, 475909322, -475352282, 363951894, -363394854, 385799325, -385242285, -218094760, 218651800, 198357559, -197800519, 534968254, -534411214, -514371882, 514928922, -369263088, 369820128, 267069560, -266512520, -37236156, 37793196, -175636305, 176193345, 506593685, -506036645, -469797415, 470354455, 204971739, -204414699, 247968200, -247411160, 499704399, -499147359, 216056503, -215499463, -169442834, 169999874, 132993396, -132436356, 106322988, -105765948, 195081012, -194523972, 45073110, -44516070, 330100924, -329543884, 317036508, -316479468, 518816756, -518259716, -15497573, 16054613, -500741754, 501298794, 215992096, -215435056, -382957781, 383514821, 230555203, -229998163, -320273567, 320830607, -182129223, 182686263};
 #endif
@@ -54,7 +58,9 @@ uint8_t ct_cmp(const unsigned char *c1, const unsigned char *c2) {
 int pke_keygen(unsigned char pk[RRLWR_PKE_PK_LEN], unsigned char sk[RRLWR_PKE_SK_LEN],
                const unsigned char seedA[RRLWR_PKE_SEED_A_LEN], const unsigned char seedS[RRLWR_SEED_S_LEN]) {
 
-#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+#if RRLWR_MUL_IS_NTT_AWIN
+  ring_element_Awin_ntt a;
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
   ring_element a;
 #else
   ring_element_Awin_q13 a;
@@ -62,7 +68,12 @@ int pke_keygen(unsigned char pk[RRLWR_PKE_PK_LEN], unsigned char sk[RRLWR_PKE_SK
   ring_element s, b;
 
   // Generate a with coefficients in [-q/2+1, q/2]
-#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+#if RRLWR_MUL_IS_NTT_AWIN
+  ring_uniform_Awin_ntt(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN,
+                        RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
+                        RRLWR_KEM_RMODPRIME, RRLWR_KEM_2RMODPRIME,
+                        rrlwr_pke_zetas);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
   ring_uniform(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN);
 #else
   ring_uniform_Awin_q13(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN);
@@ -75,7 +86,12 @@ int pke_keygen(unsigned char pk[RRLWR_PKE_PK_LEN], unsigned char sk[RRLWR_PKE_SK
   ring_pack(sk, &s, RRLWR_PKE_LOG_ETA+1);
 
   // Compute A*s
-#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+#if RRLWR_MUL_IS_NTT_AWIN
+  ring_mul32_Awin(b.x, &a, &s, RRLWR_K,
+                  RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
+                  RRLWR_NTTINV_FINALCONST,
+                  rrlwr_pke_zetas);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
   ring_mul32(b.x, &a, &s, RRLWR_K,
              RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
              RRLWR_NTTINV_FINALCONST,
@@ -104,7 +120,9 @@ int pke_keygen(unsigned char pk[RRLWR_PKE_PK_LEN], unsigned char sk[RRLWR_PKE_SK
 int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR_PKE_PK_LEN],
                 const unsigned char m[RRLWR_PKE_MESSAGE_LEN], const unsigned char seedSp[RRLWR_SEED_S_LEN]) {
 
-#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+#if RRLWR_MUL_IS_NTT_AWIN
+  ring_element_Awin_ntt a;
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
   ring_element a;
 #else
   ring_element_Awin_q13 a;
@@ -115,7 +133,12 @@ int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR
   const unsigned char *seedA = &pk[0];
 
   // Generate a with coefficients in [-q/2+1, q/2]
-#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+#if RRLWR_MUL_IS_NTT_AWIN
+  ring_uniform_Awin_ntt(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN,
+                        RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
+                        RRLWR_KEM_RMODPRIME, RRLWR_KEM_2RMODPRIME,
+                        rrlwr_pke_zetas);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
   ring_uniform(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN);
 #else
   ring_uniform_Awin_q13(&a, RRLWR_PKE_LOGQ, seedA, RRLWR_PKE_SEED_A_LEN);
@@ -125,7 +148,12 @@ int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR
   ring_uniform(&sp, RRLWR_PKE_LOG_ETA+1, seedSp, RRLWR_SEED_S_LEN);
 
   // Compute A*s_prime
-#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+#if RRLWR_MUL_IS_NTT_AWIN
+  ring_mul32_Awin(bp.x, &a, &sp, RRLWR_K,
+                  RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
+                  RRLWR_NTTINV_FINALCONST,
+                  rrlwr_pke_zetas);
+#elif RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
   ring_mul32(bp.x, &a, &sp, RRLWR_K,
              RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
              RRLWR_NTTINV_FINALCONST,
@@ -144,7 +172,7 @@ int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR
 
   // Compute v_prime = b*s_prime
   ring_unpack(&b, pk + RRLWR_PKE_SEED_A_LEN, RRLWR_PKE_LOGP);
-#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+#if RRLWR_MUL_IS_NTT
   ring_ntt32(&b, RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV, rrlwr_pke_zetas);
   ring_mul_invntt32(vp, &b, &sp, RRLWR_PKE_ELL,
                     RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
@@ -180,7 +208,7 @@ int pke_encrypt(unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char pk[RRLWR
 int pke_decrypt(unsigned char m[RRLWR_PKE_MESSAGE_LEN], 
                 const unsigned char ct[RRLWR_PKE_CT_LEN], const unsigned char sk[RRLWR_PKE_SK_LEN]) {
   ring_element bp, s;
-#if RRLWR_MUL_MODE != RRLWR_MUL_MODE_NTT
+#if !RRLWR_MUL_IS_NTT
   ring_element_Awin_q13 bpw;
 #endif
   poly v[RRLWR_PKE_ELL];
@@ -195,7 +223,7 @@ int pke_decrypt(unsigned char m[RRLWR_PKE_MESSAGE_LEN],
   }
 
   // Compute v = b_prime*s
-#if RRLWR_MUL_MODE == RRLWR_MUL_MODE_NTT
+#if RRLWR_MUL_IS_NTT
   ring_mul32(v, &bp, &s, RRLWR_PKE_ELL,
              RRLWR_PKE_PRIME, RRLWR_PKE_PRIMEINV,
              RRLWR_NTTINV_FINALCONST,

@@ -378,11 +378,18 @@ void ring_mul_q13_Awin(poly *r,
   for(int i = RRLWR_K - 1; i >= row_min; i--) {
     int out = i - row_min;
     const poly *row = &a->x[RRLWR_K - 1 - i];
+    int64_t acc[RRLWR_N];
 
-    poly_mul_q13(&r[out], &row[0], &b->x[0]);
+    for(unsigned int c = 0; c < RRLWR_N; c++) {
+      acc[c] = 0;
+    }
 
-    for(int j = 1; j < RRLWR_K; j++) {
-      poly_macc_q13(&r[out], &row[j], &b->x[j]);
+    for(int j = 0; j < RRLWR_K; j++) {
+      poly_macc_q13_toom4x32_karatsuba_i64(acc, &row[j], &b->x[j]);
+    }
+
+    for(unsigned int c = 0; c < RRLWR_N; c++) {
+      r[out].coeffs[c] = q13_reduce_u_i64(acc[c]);
     }
   }
 }

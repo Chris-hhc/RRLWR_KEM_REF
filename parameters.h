@@ -85,13 +85,14 @@ extern "C"
   #define RRLWR_MUL_MODE_TOOM         1
   #define RRLWR_MUL_MODE_SMALLSECRET  2
   #define RRLWR_MUL_MODE_SMALLSECRET_CT 3
+  #define RRLWR_MUL_MODE_NTT_AWIN     4
 
   #ifndef RRLWR_MUL_MODE
     #define RRLWR_MUL_MODE RRLWR_MUL_MODE_NTT
   #endif
 
-  #if RRLWR_MUL_MODE < RRLWR_MUL_MODE_NTT || RRLWR_MUL_MODE > RRLWR_MUL_MODE_SMALLSECRET_CT
-    #error "RRLWR_MUL_MODE must be 0 (NTT), 1 (Toom), 2 (smallsecret), or 3 (CT smallsecret)"
+  #if RRLWR_MUL_MODE < RRLWR_MUL_MODE_NTT || RRLWR_MUL_MODE > RRLWR_MUL_MODE_NTT_AWIN
+    #error "RRLWR_MUL_MODE must be 0 (NTT), 1 (Toom), 2 (smallsecret), 3 (CT smallsecret), or 4 (NTT A-window)"
   #endif
 
   // Define hash functions

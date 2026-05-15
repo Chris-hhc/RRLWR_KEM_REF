@@ -72,6 +72,7 @@ extern "C"
   void poly_basemul32(poly *r, const poly *f, const poly *g, int32_t prime, int32_t primeinv);
   void poly_mul_yplus2_q13(poly *r, const poly *a);
   void poly_mul_q13_schoolbook(poly *r, const poly *a, const poly *b);
+  void poly_macc_q13_toom4x32_karatsuba_i64(int64_t acc[RRLWR_N], const poly *a, const poly *b);
   void poly_mul_q13_toom4x32_karatsuba(poly *r, const poly *a, const poly *b);
   void poly_mul_q13(poly *r, const poly *a, const poly *b);
   void poly_macc_q13(poly *acc, const poly *a, const poly *b);
